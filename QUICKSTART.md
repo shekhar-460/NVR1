@@ -1,6 +1,6 @@
 # Quick start
 
-Minimal steps to record cameras and open the live dashboard. Full detail: [README.md](README.md).
+Minimal steps to run the live dashboard (and optionally record). Full detail: [README.md](README.md).
 
 ---
 
@@ -54,13 +54,16 @@ pip install -r requirements.txt
 ```bash
 cp config/cameras.example.yaml config/cameras.yaml
 chmod 600 config/cameras.yaml
+cp .env.example .env
+chmod 600 .env
 ```
 
 Edit **`config/cameras.yaml`**:
 
-- Set each **`url`** (usually `rtsp://…`).
-- Give each camera a unique **`id`** (folder name under `recordings_dir` and under `hls_dir`).
-- **`recordings_dir`** / **`hls_dir`** paths are relative to the **`config/`** directory unless you use an absolute path.
+- Set each camera's **`url`** (usually `rtsp://…`). Use `${VAR}` for credentials and define the variables in `.env`.
+- Give each camera a unique **`id`** matching `[A-Za-z0-9][A-Za-z0-9_-]*` (it's used as a directory name).
+- **`recordings_dir`** / **`hls_dir`** paths are relative to the **`config/`** directory unless absolute.
+- Use **`record`** / **`live`** (top-level or per-camera) to enable/disable each pipeline. `record: false` + `live: true` is the low-CPU live-only setup; the same effect is available one-off via `--no-record`.
 
 Example (matches the template defaults):
 
@@ -71,18 +74,31 @@ recording_format: mpegts
 segment_seconds: 300
 rtsp_transport: tcp
 
+# Global toggles (per-camera overrides available below).
+record: true
+live: true
+
 web:
   host: "0.0.0.0"
   port: 8765
 
 cameras:
-  - id: front
+  - id: front_door
     name: Front door
-    url: rtsp://user:password@192.168.1.50:554/stream1
-    # hevc_tag: true # use for H.265 main streams (e.g. Hikvision ch101)
+    url: rtsp://${NVR_RTSP_USERNAME}:${NVR_CAM_FRONT_DOOR_PASSWORD}@192.168.1.50:554/stream1
+    # hevc_tag: true  # for H.265 main streams (e.g. Hikvision ch101)
+    # record: false   # live-only for this camera
+    # live: false     # archive-only for this camera
 ```
 
 With this layout, recordings land under **`recordings/<camera_id>/…`** (default **`.ts`** segments; see `recording_format` in [README.md](README.md)).
+
+Fill in `.env`:
+
+```
+NVR_RTSP_USERNAME=admin
+NVR_CAM_FRONT_DOOR_PASSWORD=...
+```
 
 ---
 
@@ -94,9 +110,11 @@ Stay in the project root, venv activated:
 python3 -m nvr
 ```
 
-By default this starts **both** MP4 recording and the **web UI** (with HLS transcoders).
+By default this obeys the `record` / `live` settings in `cameras.yaml` (both `true` out of the box). Pass `--no-record` or `--no-web` for one-off overrides, or set them in the config to persist.
 
-- **Dashboard:** [http://127.0.0.1:8765/](http://127.0.0.1:8765/)
+- **Dashboard:** [http://127.0.0.1:8765/](http://127.0.0.1:8765/) — live tiles with status dots
+- **Recordings:** [http://127.0.0.1:8765/recordings](http://127.0.0.1:8765/recordings) — browse/play/download clips
+- **Health:** [http://127.0.0.1:8765/api/health](http://127.0.0.1:8765/api/health) — per-camera state (JSON)
 - **API docs:** [http://127.0.0.1:8765/docs](http://127.0.0.1:8765/docs)
 
 If `web.host` is `0.0.0.0`, you can also open `http://<your-lan-ip>:8765/` from another device on the network.
@@ -105,25 +123,46 @@ Stop with **Ctrl+C**.
 
 ### Run modes
 
-| Goal | Command |
-|------|---------|
-| Default (record + live web) | `python3 -m nvr` |
-| Record only (no HTTP / HLS) | `python3 -m nvr --no-web` |
-| Live web only (no MP4 archive) | `python3 -m nvr --no-record` |
-| Verbose logs | `python3 -m nvr -v` |
+| Goal | How |
+|------|-----|
+| Default (from config) | `python3 -m nvr` |
+| Persist "live-only" | set `record: false` in `cameras.yaml`, run normally |
+| Persist "record-only" | set `live: false` in `cameras.yaml`, run normally |
+| One-off live-only | `python3 -m nvr --no-record` |
+| One-off record-only | `python3 -m nvr --no-web` |
+| Force-enable recording for a test run | `python3 -m nvr --record` |
+| Verbose logs (FFmpeg stderr included) | `python3 -m nvr -v` |
 | Custom config path | `python3 -m nvr -c /etc/nvr/cameras.yaml` |
-| Override port | `python3 -m nvr --port 9000` |
+| Override listen port | `python3 -m nvr --port 9000` |
+
+Per-camera `record` / `live` / `enabled` in the config let you mix live-only and record-only cameras in the same install.
 
 ---
 
-## 5. Troubleshooting
+## 5. Reading the UI
+
+Each live tile has a status dot that polls `/api/health`:
+
+- **Green** — HLS is running and segments are fresh.
+- **Yellow (pulsing)** — starting up, restarting after a crash, or stalled (running but no fresh segments).
+- **Red** — permanently failed after many consecutive immediate restarts (usually wrong URL or bad credentials — check logs).
+- **Grey** — live disabled for this camera.
+
+The line under each tile shows the per-pipeline state and the playlist age, so you can tell at a glance whether the source is healthy.
+
+---
+
+## 6. Troubleshooting
 
 | Problem | What to try |
 |---------|-------------|
 | `Config not found` | Ensure `config/cameras.yaml` exists or pass `-c` to the real path. |
-| `ffmpeg not found` | Install FFmpeg; run `which ffmpeg` (Linux/macOS) and fix `PATH`. |
-| Blank or frozen video tiles | Wait a few seconds for the first HLS segments; run with `-v` and check FFmpeg lines; validate the RTSP URL with `ffplay` or `ffmpeg -i`. |
+| `ffmpeg not found` | Install FFmpeg; run `which ffmpeg` and fix `PATH`. A red dot with `failed_permanently: true` also signals this. |
+| Nothing to do: both recording and live are disabled | Set `record` or `live` to `true` in the config, or pass `--record` / `--web`. |
+| `Missing or empty environment variable 'NVR_…'` | Create `.env` from `.env.example` and fill in the referenced variables. |
+| Blank or frozen video tiles | Wait a few seconds for the first HLS segments; run with `-v` and check the per-camera FFmpeg lines (`nvr.ffmpeg.hls.<id>`); validate the RTSP URL with `ffplay` or `ffmpeg -i`. The status dot going yellow → green indicates progress. |
+| Red dot immediately | Permanent failure after repeated sub-3s restarts. Open `/api/health`, read `last_error`. Common causes: wrong URL path, wrong password, unsupported transport. |
 | `ModuleNotFoundError` / import errors | Run **`python3 -m nvr`** from the **project root**, not from inside the `nvr/` source folder. |
-| Wrong recordings folder | Remember paths in YAML are relative to **`config/`** unless absolute; see [README.md](README.md). |
-| `Failed to open segment` / `No such file or directory` | Fixed in current versions by flat filenames under each camera dir. Upgrade and set `recording_format: mpegts` if MP4/HEVC still misbehaves. |
+| Wrong recordings folder | Paths in YAML are relative to **`config/`** unless absolute; see [README.md](README.md). |
 | HEVC / `hvc1` / blank HLS in Chrome | Set **`hevc_tag: true`** on that camera; for H.264 substreams remove it. HEVC in the browser may still need Safari or an H.264 URL. |
+| `duplicate camera id` or `camera id '…' is not safe` | IDs must be unique and match `^[A-Za-z0-9][A-Za-z0-9_-]*$`. Rename in `cameras.yaml`. |

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NVR — Recordings</title>
+    <link rel="stylesheet" href="/css/main.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="nav">
+        <h1>NVR — Recordings</h1>
+        <nav class="muted">
+          <a href="/">Live</a>
+          <span aria-hidden="true">·</span>
+          <a href="/recordings" class="active">Recordings</a>
+          <span aria-hidden="true">·</span>
+          <a href="/docs">API</a>
+        </nav>
+      </div>
+      <p class="muted" id="summary">Loading…</p>
+    </header>
+    <main class="recordings-layout">
+      <aside class="cam-list" id="cam-list"></aside>
+      <section class="cam-detail">
+        <header class="cam-detail-head">
+          <h2 id="cam-name">Select a camera</h2>
+          <span class="muted" id="cam-meta"></span>
+        </header>
+        <video
+          id="player"
+          controls
+          playsinline
+          preload="metadata"
+          style="width:100%; aspect-ratio:16/9; background:#000; display:none"
+        ></video>
+        <ul class="recording-list" id="rec-list"></ul>
+        <div class="pager" id="pager"></div>
+      </section>
+    </main>
+    <script src="/js/recordings.js"></script>
+  </body>
+</html>

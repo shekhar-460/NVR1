@@ -9,6 +9,11 @@ recording_format: mpegts
 segment_seconds: 300
 rtsp_transport: tcp
 
+# Global toggles — per-camera values (below) override these when set.
+# CLI flags (--record/--no-record, --web/--no-web) override both.
+record: true
+live: true
+
 web:
   host: "0.0.0.0"
   port: 8765
@@ -21,6 +26,9 @@ cameras:
     name: Front door
     url: rtsp://${NVR_RTSP_USERNAME}:${NVR_CAM_FRONT_DOOR_PASSWORD}@192.168.1.100:554/stream1
     # hevc_tag: true # uncomment for H.265 main streams (Hikvision/Reolink etc.)
+    # record: false  # live-only for this camera
+    # live: false    # archive-only for this camera
+    # enabled: false # disables both record and live for this camera
   - id: garage
     name: Garage
     url: rtsp://${NVR_RTSP_USERNAME}:${NVR_CAM_GARAGE_PASSWORD}@192.168.1.101:554/h264Preview_01_main

@@ -1,47 +1,195 @@
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 
+from nvr.state import REGISTRY, Role
+
 log = logging.getLogger("nvr")
+
+# A run that survives at least this long is considered "healthy" — the backoff
+# resets and the failure streak clears, so one flaky network blip later won't
+# push retries out to the 60-second cap.
+_HEALTHY_RUNTIME_S = 30.0
+
+# If FFmpeg exits in under this many seconds, count it as an "immediate" failure.
+_IMMEDIATE_FAIL_S = 3.0
+
+# After this many consecutive immediate failures, give up on the camera (most
+# likely: wrong URL, wrong credentials, unsupported codec). The registry marks
+# it failed so the UI / health endpoint can show it.
+_MAX_IMMEDIATE_FAILURES = 10
+
+
+def _pump_stderr(proc: subprocess.Popen[bytes], logger: logging.Logger, last_line: list[str]) -> None:
+    """Read FFmpeg stderr line-by-line into the per-camera logger."""
+    stream = proc.stderr
+    if stream is None:
+        return
+    try:
+        for raw in iter(stream.readline, b""):
+            line = raw.decode("utf-8", errors="replace").rstrip()
+            if not line:
+                continue
+            last_line[0] = line
+            lowered = line.lower()
+            if "error" in lowered or "failed" in lowered:
+                logger.error(line)
+            elif "warning" in lowered:
+                logger.warning(line)
+            else:
+                logger.info(line)
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("stderr pump stopped", exc_info=True)
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
+def _terminate(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate an FFmpeg process (and any children) without hanging."""
+    if proc.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def supervise_ffmpeg(
     label: str,
     build_cmd: Callable[[], list[str]],
-    stop: list[bool],
+    stop: threading.Event,
+    *,
+    camera_id: str,
+    role: Role,
 ) -> None:
-    """Run FFmpeg in a loop until stop; rebuild command each attempt (fresh paths/dirs)."""
+    """Run FFmpeg in a loop until ``stop`` is set; rebuild the command each attempt."""
     backoff = 1.0
     max_backoff = 60.0
-    while not stop[0]:
+    cam_logger = logging.getLogger(f"nvr.ffmpeg.{role}.{camera_id}")
+
+    while not stop.is_set():
         cmd = build_cmd()
         log.info("Starting FFmpeg: %s", label)
+        cam_logger.debug("cmd: %s", " ".join(cmd))
         try:
-            proc = subprocess.Popen(cmd)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
         except FileNotFoundError:
             log.error("ffmpeg not found; install ffmpeg and ensure it is on PATH")
-            stop[0] = True
+            REGISTRY.mark_failed_permanently(camera_id, role)
+            stop.set()
             return
-        while proc.poll() is None and not stop[0]:
-            time.sleep(0.5)
-        if stop[0]:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            return
-        code = proc.poll()
-        log.warning(
-            "FFmpeg exited (%s) with code %s; retrying in %.0fs",
-            label,
-            code,
-            backoff,
+
+        REGISTRY.mark_started(camera_id, role)
+        started = time.monotonic()
+        last_line: list[str] = [""]
+        pump = threading.Thread(
+            target=_pump_stderr,
+            args=(proc, cam_logger, last_line),
+            name=f"ffmpeg-stderr-{role}-{camera_id}",
+            daemon=True,
         )
-        t0 = time.monotonic()
-        while time.monotonic() - t0 < backoff and not stop[0]:
-            time.sleep(0.3)
+        pump.start()
+
+        while proc.poll() is None and not stop.is_set():
+            stop.wait(0.5)
+
+        if stop.is_set():
+            _terminate(proc)
+            pump.join(timeout=2)
+            REGISTRY.mark_exited(
+                camera_id,
+                role,
+                code=proc.returncode,
+                error=None,
+                was_healthy=True,
+            )
+            return
+
+        code = proc.poll()
+        pump.join(timeout=2)
+        runtime = time.monotonic() - started
+        was_healthy = runtime >= _HEALTHY_RUNTIME_S
+        REGISTRY.mark_exited(
+            camera_id,
+            role,
+            code=code,
+            error=last_line[0] or None,
+            was_healthy=was_healthy,
+        )
+        status = REGISTRY.status_for(camera_id, role)
+
+        if was_healthy:
+            backoff = 1.0
+            log.warning(
+                "FFmpeg exited (%s) after %.0fs with code %s; retrying in %.0fs",
+                label,
+                runtime,
+                code,
+                backoff,
+            )
+        elif runtime < _IMMEDIATE_FAIL_S:
+            log.warning(
+                "FFmpeg exited (%s) after %.1fs with code %s (streak=%d); retrying in %.0fs",
+                label,
+                runtime,
+                code,
+                status.failure_streak,
+                backoff,
+            )
+            if status.failure_streak >= _MAX_IMMEDIATE_FAILURES:
+                log.error(
+                    "FFmpeg for %s failed %d times in a row with no healthy run; "
+                    "giving up. Last stderr: %s",
+                    label,
+                    status.failure_streak,
+                    last_line[0] or "(empty)",
+                )
+                REGISTRY.mark_failed_permanently(camera_id, role)
+                return
+        else:
+            log.warning(
+                "FFmpeg exited (%s) after %.0fs with code %s; retrying in %.0fs",
+                label,
+                runtime,
+                code,
+                backoff,
+            )
+
+        if stop.wait(backoff):
+            return
         backoff = min(max_backoff, backoff * 2)

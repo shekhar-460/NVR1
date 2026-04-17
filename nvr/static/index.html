@@ -8,7 +8,16 @@
   </head>
   <body>
     <header class="header">
-      <h1>NVR</h1>
+      <div class="nav">
+        <h1>NVR</h1>
+        <nav class="muted">
+          <a href="/" class="active">Live</a>
+          <span aria-hidden="true">·</span>
+          <a href="/recordings">Recordings</a>
+          <span aria-hidden="true">·</span>
+          <a href="/docs">API</a>
+        </nav>
+      </div>
       <p class="muted">Live view via HLS. Each camera uses a separate transcoder process.</p>
     </header>
     <main id="grid" class="grid" aria-live="polite"></main>

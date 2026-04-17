@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+
+from nvr.ffmpeg_common import copy_codec_args, ffmpeg_input_args
 from nvr.settings import Camera, Settings
 from nvr.supervisor import supervise_ffmpeg
 
@@ -14,25 +17,11 @@ def build_record_command(cam: Camera, settings: Settings) -> list[str]:
     else:
         ext = ".ts"
         seg_fmt = "mpegts"
-    # Single directory per camera (no nested date folders): FFmpeg does not mkdir %Y-%m-%d for segment.
+    # Single directory per camera (no nested date folders): FFmpeg does not mkdir
+    # %Y-%m-%d for segment output.
     pattern = str(out_dir / f"%Y-%m-%d_%H-%M-%S{ext}")
-    cmd: list[str] = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-rtsp_transport",
-        settings.rtsp_transport,
-        "-fflags",
-        "+genpts",
-        "-i",
-        cam.url,
-        "-an",
-    ]
-    if cam.hevc_tag and fmt == "mp4":
-        cmd.extend(["-c:v", "copy", "-tag:v", "hvc1"])
-    else:
-        cmd.extend(["-c", "copy"])
+    cmd = ffmpeg_input_args(cam, settings)
+    cmd.extend(copy_codec_args(cam))
     cmd.extend(
         [
             "-f",
@@ -53,11 +42,13 @@ def build_record_command(cam: Camera, settings: Settings) -> list[str]:
     return cmd
 
 
-def run_camera_recorder(cam: Camera, settings: Settings, stop: list[bool]) -> None:
+def run_camera_recorder(cam: Camera, settings: Settings, stop: threading.Event) -> None:
     supervise_ffmpeg(
         f"record:{cam.name} ({cam.id})",
         lambda: build_record_command(cam, settings),
         stop,
+        camera_id=cam.id,
+        role="record",
     )
 
 
