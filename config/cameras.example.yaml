@@ -1,0 +1,26 @@
+# Copy to config/cameras.yaml and edit. Requires ffmpeg on PATH.
+# Paths below are relative to this file's directory (config/).
+
+# Project root: ../ is the NVR repo root (this file lives in config/).
+recordings_dir: ../recordings
+hls_dir: ../data/hls
+# mpegts = .ts segments (works well with H.264/H.265 copy). Use mp4 for H.264 if you prefer.
+recording_format: mpegts
+segment_seconds: 300
+rtsp_transport: tcp
+
+web:
+  host: "0.0.0.0"
+  port: 8765
+
+# Credentials: set NVR_RTSP_USERNAME and NVR_CAM_*_PASSWORD in a .env file at the repo root
+# (loaded automatically). Use ${VAR_NAME} in rtsp URLs as shown below.
+
+cameras:
+  - id: front_door
+    name: Front door
+    url: rtsp://${NVR_RTSP_USERNAME}:${NVR_CAM_FRONT_DOOR_PASSWORD}@192.168.1.100:554/stream1
+    # hevc_tag: true # uncomment for H.265 main streams (Hikvision/Reolink etc.)
+  - id: garage
+    name: Garage
+    url: rtsp://${NVR_RTSP_USERNAME}:${NVR_CAM_GARAGE_PASSWORD}@192.168.1.101:554/h264Preview_01_main
