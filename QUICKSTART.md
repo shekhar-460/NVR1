@@ -64,6 +64,7 @@ Edit **`config/cameras.yaml`**:
 - Give each camera a unique **`id`** matching `[A-Za-z0-9][A-Za-z0-9_-]*` (it's used as a directory name).
 - **`recordings_dir`** / **`hls_dir`** paths are relative to the **`config/`** directory unless absolute.
 - Use **`record`** / **`live`** (top-level or per-camera) to enable/disable each pipeline. `record: false` + `live: true` is the low-CPU live-only setup; the same effect is available one-off via `--no-record`.
+- Optional: enable **`multiscreen`** to publish one combined live mosaic stream in parallel with normal per-camera streams.
 
 Example (matches the template defaults):
 
@@ -81,6 +82,17 @@ live: true
 web:
   host: "0.0.0.0"
   port: 8765
+
+multiscreen:
+  enabled: false
+  # camera_ids: [front_door, garage]  # optional; defaults to all live-enabled cameras
+  cols: 2
+  tile_width: 640
+  tile_height: 360
+  fps: 10
+  bitrate: 3000k
+  preset: veryfast
+  output_id: multiscreen
 
 cameras:
   - id: front_door
@@ -115,9 +127,15 @@ By default this obeys the `record` / `live` settings in `cameras.yaml` (both `tr
 - **Dashboard:** [http://127.0.0.1:8765/](http://127.0.0.1:8765/) — live tiles with status dots
 - **Recordings:** [http://127.0.0.1:8765/recordings](http://127.0.0.1:8765/recordings) — browse/play/download clips
 - **Health:** [http://127.0.0.1:8765/api/health](http://127.0.0.1:8765/api/health) — per-camera state (JSON)
+- **Multiscreen API (optional):** [http://127.0.0.1:8765/api/multiscreen](http://127.0.0.1:8765/api/multiscreen)
 - **API docs:** [http://127.0.0.1:8765/docs](http://127.0.0.1:8765/docs)
 
 If `web.host` is `0.0.0.0`, you can also open `http://<your-lan-ip>:8765/` from another device on the network.
+
+If multiscreen is enabled, its HLS URL is:
+
+- `http://127.0.0.1:8765/live/<output_id>/stream.m3u8` (default: `/live/multiscreen/stream.m3u8`)
+- The dashboard automatically adds a **Multiscreen** tile when this stream is active.
 
 Stop with **Ctrl+C**.
 
@@ -150,6 +168,8 @@ Each live tile has a status dot that polls `/api/health`:
 
 The line under each tile shows the per-pipeline state and the playlist age, so you can tell at a glance whether the source is healthy.
 
+If multiscreen is enabled and active, it appears as its own tile at the top of the dashboard and follows the same status-dot behavior.
+
 ---
 
 ## 6. Troubleshooting
@@ -161,6 +181,7 @@ The line under each tile shows the per-pipeline state and the playlist age, so y
 | Nothing to do: both recording and live are disabled | Set `record` or `live` to `true` in the config, or pass `--record` / `--web`. |
 | `Missing or empty environment variable 'NVR_…'` | Create `.env` from `.env.example` and fill in the referenced variables. |
 | Blank or frozen video tiles | Wait a few seconds for the first HLS segments; run with `-v` and check the per-camera FFmpeg lines (`nvr.ffmpeg.hls.<id>`); validate the RTSP URL with `ffplay` or `ffmpeg -i`. The status dot going yellow → green indicates progress. |
+| Multiscreen stutters / high CPU | Lower `multiscreen.fps`, `tile_width`, `tile_height`, or bitrate; multiscreen re-encodes all included cameras. |
 | Red dot immediately | Permanent failure after repeated sub-3s restarts. Open `/api/health`, read `last_error`. Common causes: wrong URL path, wrong password, unsupported transport. |
 | `ModuleNotFoundError` / import errors | Run **`python3 -m nvr`** from the **project root**, not from inside the `nvr/` source folder. |
 | Wrong recordings folder | Paths in YAML are relative to **`config/`** unless absolute; see [README.md](README.md). |

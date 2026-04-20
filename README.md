@@ -5,6 +5,7 @@ Multi-camera IP CCTV recorder with a **browser dashboard** for live viewing and 
 ## Features
 
 - **Multiple streams** — separate supervisor loop per camera; one camera failing does not stop the others.
+- **Optional multiscreen stream** — compose multiple cameras into one HLS mosaic (`/live/multiscreen/stream.m3u8`) while keeping per-camera streams unchanged.
 - **Disk recording** — time-segmented MPEG-TS/MP4 under a configurable root (`-c copy`, low CPU when the source is already H.264).
 - **Web UI** — responsive grid of live tiles with per-camera status dots; [FastAPI](https://fastapi.tiangolo.com/) serves the app, the health API, and static HLS under `/live/…`.
 - **Recordings browser** — `/recordings` page lists clips per camera with inline playback and download links (supports HTTP `Range` for scrubbing).
@@ -85,6 +86,7 @@ Copy `config/cameras.example.yaml` to `config/cameras.yaml`.
 | `rtsp_transport` | FFmpeg `-rtsp_transport` (`tcp` by default). Also accepts `udp`, `udp_multicast`, `http`. |
 | `record` | Global enable for disk recording (`true` by default). Per-camera overrides below. |
 | `live` | Global enable for HLS/web (`true` by default). Per-camera overrides below. |
+| `multiscreen` | Optional single mosaic HLS output built from selected live cameras (disabled by default). |
 | `web.host` / `web.port` | HTTP bind address and port (`0.0.0.0` and **8765** by default). |
 | `cameras` | List of cameras — see below. |
 
@@ -100,6 +102,21 @@ Copy `config/cameras.example.yaml` to `config/cameras.yaml`.
 | `live` | Override the global `live` toggle for this camera. |
 | `enabled` | `false` disables both record and live for this camera. Default `true`. |
 
+### Optional multiscreen keys
+
+The `multiscreen` block is disabled by default. When enabled, NVR starts a separate FFmpeg compositor that decodes selected live cameras, arranges them into a grid, and publishes a single HLS stream.
+
+| Key | Description |
+|-----|-------------|
+| `enabled` | Enable multiscreen compositor (`false` by default). |
+| `camera_ids` | Optional list of camera IDs to include; if omitted/empty, all live-enabled cameras are used. |
+| `cols` | Number of grid columns. Rows are auto-calculated. |
+| `tile_width` / `tile_height` | Pixel size for each tile before stacking (default `640x360`). |
+| `fps` | Output frame rate for the combined stream (default `10`). |
+| `bitrate` | Encoder bitrate for the combined stream (default `3000k`). |
+| `preset` | x264 preset for the combined stream (default `veryfast`). |
+| `output_id` | HLS output folder/name under `/live/` (default `multiscreen`). |
+
 ### Defaults if a key is omitted
 
 | Key | Default |
@@ -111,6 +128,7 @@ Copy `config/cameras.example.yaml` to `config/cameras.yaml`.
 | `rtsp_transport` | `tcp` |
 | `record` | `true` |
 | `live` | `true` |
+| `multiscreen.enabled` | `false` |
 | `web.host` | `0.0.0.0` |
 | `web.port` | `8765` |
 
@@ -125,11 +143,12 @@ Files are written in **one directory per camera** (FFmpeg does not create nested
 
 ### Web API and live playback
 
-- **`GET /`** — live dashboard (one tile per camera with `live: true`).
+- **`GET /`** — live dashboard (one tile per camera with `live: true`; includes a **Multiscreen** tile when multiscreen is active).
 - **`GET /recordings`** — recordings browser (list by camera, inline play, download).
 - **`GET /docs`** — interactive OpenAPI UI (FastAPI).
 - **`GET /api/cameras`** — JSON list of cameras with `{id, name, enabled, record, live, hls_url}`.
 - **`GET /api/health`** — per-camera pipeline state: `running`, `uptime_s`, `restart_count`, `failure_streak`, `last_exit_code`, `last_error`, and `hls_playlist_age_s` / `hls_fresh` for quick external monitoring.
+- **`GET /api/multiscreen`** — multiscreen config/runtime view: enabled/active state, selected camera IDs, output ID, and HLS URL.
 - **`GET /api/recordings`** — summary: per-camera counts and total bytes.
 - **`GET /api/recordings/{camera_id}?limit=&offset=`** — paginated list of recordings (newest first) with size, `mtime`, parsed `started_at`, and download URL.
 - **`GET /recordings/{camera_id}/{filename}`** — serves a specific file (supports HTTP `Range`). Filenames and camera IDs are validated to prevent path traversal.
@@ -179,6 +198,8 @@ Each tile has a colored status dot, refreshed every few seconds from `/api/healt
 
 The line under each video shows the current state (`live: running`, `record: running`, playlist age) for quick at-a-glance diagnosis.
 
+When `multiscreen.enabled: true` and at least one eligible live camera exists, the dashboard also shows a **Multiscreen** tile (fed by `/live/<output_id>/stream.m3u8`). Its status is derived from the same health model (`running`, `restarting`, `stalled`, `failed`) and playlist freshness checks.
+
 ## Recordings browser
 
 `/recordings` lists cameras in the left rail (with recording count and total size) and the selected camera's clips on the right, newest first. Each row has a ▶ button for inline preview and a **Download** link. Pagination kicks in past 50 clips.
@@ -203,6 +224,7 @@ Recorder and HLS pipelines use **`-an`** (no audio). To record or stream audio, 
 
 - **Disk** — HLS keeps a short rolling window of segments; archived recordings grow with bitrate and time. Plan retention (a retention job is on the roadmap; for now, use cron/lifecycle rules).
 - **Browser** — HLS uses codec copy; many desktops play H.264 in TS; **H.265/HEVC** in-browser is spotty outside Safari. Set **`hevc_tag: true`** for HEVC streams. Prefer the camera's H.264 substream for widest browser support, or accept transcoding (not included here).
+- **Multiscreen CPU cost** — unlike per-camera copy-mode HLS, multiscreen decodes and re-encodes all included cameras into one canvas. Keep `fps`/tile size modest on low-power hosts.
 - **Camera quirks** — If segments glitch or fail to open, test the same URL with the `ffmpeg` CLI (`-v` shows the captured stderr) and tune flags for that firmware.
 - **Monitoring** — Hit `/api/health` from an external checker; `hls_fresh: false` or `pipelines.hls.state: "failed"` are the signals you care about.
 

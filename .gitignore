@@ -9,3 +9,4 @@ recordings/*
 config/cameras.yaml
 .env
 *.log
+config/

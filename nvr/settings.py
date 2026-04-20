@@ -33,6 +33,19 @@ class WebSettings:
 
 
 @dataclass
+class MultiScreenSettings:
+    enabled: bool = False
+    camera_ids: list[str] = field(default_factory=list)
+    cols: int = 2
+    tile_width: int = 640
+    tile_height: int = 360
+    fps: int = 10
+    bitrate: str = "3000k"
+    preset: str = "veryfast"
+    output_id: str = "multiscreen"
+
+
+@dataclass
 class Settings:
     recordings_dir: Path
     hls_dir: Path
@@ -45,6 +58,7 @@ class Settings:
     # Global defaults. Per-camera ``record`` / ``live`` override these when set.
     record: bool = True
     live: bool = True
+    multiscreen: MultiScreenSettings = field(default_factory=MultiScreenSettings)
     extras: dict[str, Any] = field(default_factory=dict)
 
     def should_record(self, cam: Camera) -> bool:
@@ -93,6 +107,16 @@ def _opt_bool(value: Any, key: str) -> bool | None:
     return _as_bool(value, key)
 
 
+def _as_int(value: Any, key: str, *, minimum: int = 1) -> int:
+    try:
+        out = int(value)
+    except (TypeError, ValueError):
+        raise SystemExit(f"{key}: expected integer, got {value!r}")
+    if out < minimum:
+        raise SystemExit(f"{key}: expected >= {minimum}, got {out}")
+    return out
+
+
 def load_settings(path: Path) -> Settings:
     repo_root = path.resolve().parent.parent
     env_path = repo_root / ".env"
@@ -129,6 +153,32 @@ def load_settings(path: Path) -> Settings:
         host=str(web_raw.get("host", "0.0.0.0")),
         port=int(web_raw.get("port", 8765)),
     )
+    multiscreen_raw = raw.get("multiscreen") or {}
+    multiscreen_enabled = _as_bool(multiscreen_raw.get("enabled", False), "multiscreen.enabled")
+    multiscreen_camera_ids_raw = multiscreen_raw.get("camera_ids") or []
+    if not isinstance(multiscreen_camera_ids_raw, list):
+        raise SystemExit("multiscreen.camera_ids: expected a list of camera IDs")
+    multiscreen_camera_ids = [str(item) for item in multiscreen_camera_ids_raw]
+    multiscreen_cols = _as_int(multiscreen_raw.get("cols", 2), "multiscreen.cols", minimum=1)
+    multiscreen_tile_w = _as_int(
+        multiscreen_raw.get("tile_width", 640),
+        "multiscreen.tile_width",
+        minimum=64,
+    )
+    multiscreen_tile_h = _as_int(
+        multiscreen_raw.get("tile_height", 360),
+        "multiscreen.tile_height",
+        minimum=64,
+    )
+    multiscreen_fps = _as_int(multiscreen_raw.get("fps", 10), "multiscreen.fps", minimum=1)
+    multiscreen_bitrate = str(multiscreen_raw.get("bitrate", "3000k"))
+    multiscreen_preset = str(multiscreen_raw.get("preset", "veryfast"))
+    multiscreen_output_id = str(multiscreen_raw.get("output_id", "multiscreen"))
+    if not _SAFE_ID.match(multiscreen_output_id):
+        raise SystemExit(
+            "multiscreen.output_id is not safe for filesystem paths "
+            "(allowed: letters, digits, '_' and '-'; must start alphanumeric)."
+        )
 
     cams_raw = raw.get("cameras") or []
     cameras: list[Camera] = []
@@ -158,6 +208,12 @@ def load_settings(path: Path) -> Settings:
         )
     if not cameras:
         raise SystemExit("No cameras defined in config.")
+    known_ids = {cam.id for cam in cameras}
+    missing = [cid for cid in multiscreen_camera_ids if cid not in known_ids]
+    if missing:
+        raise SystemExit(
+            f"multiscreen.camera_ids contains unknown camera IDs: {', '.join(missing)}"
+        )
 
     return Settings(
         recordings_dir=rec,
@@ -169,4 +225,15 @@ def load_settings(path: Path) -> Settings:
         web=web,
         record=record_default,
         live=live_default,
+        multiscreen=MultiScreenSettings(
+            enabled=multiscreen_enabled,
+            camera_ids=multiscreen_camera_ids,
+            cols=multiscreen_cols,
+            tile_width=multiscreen_tile_w,
+            tile_height=multiscreen_tile_h,
+            fps=multiscreen_fps,
+            bitrate=multiscreen_bitrate,
+            preset=multiscreen_preset,
+            output_id=multiscreen_output_id,
+        ),
     )

@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from nvr import __version__
+from nvr.multiscreen import selected_multiscreen_cameras
 from nvr.recordings import (
     CONTENT_TYPES,
     list_recordings,
@@ -40,6 +41,50 @@ def _camera_public(cam: Camera, settings: Settings) -> dict[str, Any]:
     }
 
 
+def _multiscreen_public(settings: Settings) -> dict[str, Any]:
+    ms = settings.multiscreen
+    cams = selected_multiscreen_cameras(settings)
+    active = settings.live and ms.enabled and len(cams) > 0
+    return {
+        "enabled": ms.enabled,
+        "active": active,
+        "output_id": ms.output_id,
+        "camera_ids": [cam.id for cam in cams],
+        "hls_url": f"/live/{ms.output_id}/stream.m3u8" if active else None,
+    }
+
+
+def _multiscreen_health(settings: Settings, now: float, statuses: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    base = _multiscreen_public(settings)
+    if not base["active"]:
+        base["pipeline"] = {
+            "configured": False,
+            "running": False,
+            "state": "disabled",
+        }
+        base["hls_playlist_age_s"] = None
+        base["hls_fresh"] = False
+        return base
+    status = statuses.get((base["output_id"], "hls"))
+    if status is None:
+        base["pipeline"] = {
+            "configured": True,
+            "running": False,
+            "state": "pending",
+        }
+    else:
+        slim = {k: v for k, v in status.items() if k not in ("camera_id", "role")}
+        base["pipeline"] = {
+            "configured": True,
+            **slim,
+            "state": _derive_state(status, True),
+        }
+    mtime = _playlist_mtime(settings.hls_dir, str(base["output_id"]))
+    base["hls_playlist_age_s"] = None if mtime is None else max(0.0, now - mtime)
+    base["hls_fresh"] = mtime is not None and (now - mtime) < 10.0
+    return base
+
+
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="NVR", version=__version__)
     app.state.settings = settings
@@ -49,6 +94,14 @@ def create_app(settings: Settings) -> FastAPI:
     def list_cameras() -> JSONResponse:
         s: Settings = app.state.settings
         return JSONResponse([_camera_public(c, s) for c in s.cameras])
+
+    @app.get("/api/multiscreen")
+    def multiscreen_info() -> JSONResponse:
+        s: Settings = app.state.settings
+        statuses = {
+            (item["camera_id"], item["role"]): item for item in REGISTRY.snapshot()
+        }
+        return JSONResponse(_multiscreen_health(s, time.time(), statuses))
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -95,6 +148,7 @@ def create_app(settings: Settings) -> FastAPI:
                 "server_time": now,
                 "version": __version__,
                 "cameras": out,
+                "multiscreen": _multiscreen_health(s, now, statuses),
             }
         )
 

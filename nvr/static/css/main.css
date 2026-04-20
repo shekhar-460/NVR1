@@ -68,6 +68,38 @@ body {
   font-size: 0.9rem;
 }
 
+.view-tabs {
+  margin-top: 0.9rem;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.view-tab {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.view-tab + .view-tab {
+  border-left: 1px solid var(--border);
+}
+
+.view-tab.active {
+  color: var(--text);
+  background: rgba(61, 139, 253, 0.15);
+}
+
+.view-tab:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

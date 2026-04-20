@@ -65,6 +65,25 @@ function overallState(cam) {
   return "pending";
 }
 
+function multiscreenState(ms) {
+  if (!ms || !ms.pipeline || !ms.pipeline.configured) return "disabled";
+  if (ms.pipeline.state === "failed") return "failed";
+  if (!ms.pipeline.running) {
+    return ms.pipeline.state === "restarting" ? "restarting" : "pending";
+  }
+  if (ms.hls_fresh === false) return "stalled";
+  return "ok";
+}
+
+function multiscreenLabel(ms) {
+  if (!ms || !ms.pipeline || !ms.pipeline.configured) return "disabled";
+  const parts = [`live: ${ms.pipeline.state || "?"}`];
+  if (ms.hls_playlist_age_s != null) {
+    parts.push(`age ${ms.hls_playlist_age_s.toFixed(1)}s`);
+  }
+  return parts.join(" · ");
+}
+
 async function refreshHealth(cards) {
   try {
     const res = await fetch("/api/health");
@@ -80,6 +99,18 @@ async function refreshHealth(cards) {
       dot.title = state;
       status.textContent = stateLabel(cam);
     }
+    const ms = data.multiscreen;
+    if (ms && ms.active && ms.output_id) {
+      const card = cards.get(ms.output_id);
+      if (card) {
+        const state = multiscreenState(ms);
+        const dot = card.querySelector(".dot");
+        const status = card.querySelector(".status");
+        dot.dataset.state = state;
+        dot.title = state;
+        status.textContent = multiscreenLabel(ms);
+      }
+    }
   } catch (e) {
     console.warn("health poll failed", e);
   }
@@ -88,41 +119,100 @@ async function refreshHealth(cards) {
 async function init() {
   const grid = document.getElementById("grid");
   const status = document.getElementById("status");
+  const tabSingles = document.getElementById("tab-singles");
+  const tabMultiscreen = document.getElementById("tab-multiscreen");
+  let selectedView = "singles";
+  let cards = new Map();
+
+  const setActiveTab = (view, hasMultiscreen) => {
+    selectedView = view;
+    tabSingles.classList.toggle("active", view === "singles");
+    tabSingles.setAttribute("aria-selected", String(view === "singles"));
+    tabMultiscreen.classList.toggle("active", view === "multiscreen");
+    tabMultiscreen.setAttribute("aria-selected", String(view === "multiscreen"));
+    tabMultiscreen.disabled = !hasMultiscreen;
+  };
+
+  const renderCard = (cam) => {
+    const card = document.createElement("article");
+    card.className = "card";
+    card.innerHTML =
+      `<header class="card-head">` +
+      `<span class="dot" data-state="pending" title="pending"></span>` +
+      `<h2>${escapeHtml(cam.name)}</h2>` +
+      `<span class="meta muted">${escapeHtml(cam.id)}</span>` +
+      `</header>` +
+      `<video controls muted playsinline></video>` +
+      `<p class="status muted">connecting…</p>`;
+    const video = card.querySelector("video");
+    grid.appendChild(card);
+    cards.set(cam.id, card);
+    try {
+      attachHls(video, cam.hls_url);
+    } catch (e) {
+      const p = document.createElement("p");
+      p.className = "err";
+      p.textContent = e.message || String(e);
+      card.appendChild(p);
+    }
+  };
+
   try {
-    const res = await fetch("/api/cameras");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const cameras = await res.json();
+    const [camsRes, msRes] = await Promise.all([
+      fetch("/api/cameras"),
+      fetch("/api/multiscreen"),
+    ]);
+    if (!camsRes.ok) throw new Error(`HTTP ${camsRes.status}`);
+    const cameras = await camsRes.json();
+    const multiscreen = msRes.ok ? await msRes.json() : null;
     const liveCameras = cameras.filter((c) => c.live && c.hls_url);
-    status.textContent = `${liveCameras.length} live camera(s)`;
-    grid.innerHTML = "";
-    const cards = new Map();
-    for (const cam of liveCameras) {
-      const card = document.createElement("article");
-      card.className = "card";
-      card.innerHTML =
-        `<header class="card-head">` +
-        `<span class="dot" data-state="pending" title="pending"></span>` +
-        `<h2>${escapeHtml(cam.name)}</h2>` +
-        `<span class="meta muted">${escapeHtml(cam.id)}</span>` +
-        `</header>` +
-        `<video controls muted playsinline></video>` +
-        `<p class="status muted">connecting…</p>`;
-      const video = card.querySelector("video");
-      grid.appendChild(card);
-      cards.set(cam.id, card);
-      try {
-        attachHls(video, cam.hls_url);
-      } catch (e) {
-        const p = document.createElement("p");
-        p.className = "err";
-        p.textContent = e.message || String(e);
-        card.appendChild(p);
+    const hasMultiscreen = !!(multiscreen && multiscreen.active && multiscreen.hls_url);
+    const renderView = () => {
+      grid.innerHTML = "";
+      cards = new Map();
+      if (selectedView === "multiscreen") {
+        if (!hasMultiscreen) {
+          status.textContent = "Multiscreen is not active.";
+          grid.innerHTML =
+            `<p class="muted" style="padding:1rem 1.5rem">Multiscreen is disabled or unavailable. Enable <code>multiscreen.enabled: true</code> in config/cameras.yaml.</p>`;
+          return;
+        }
+        status.textContent = "1 live stream (multiscreen)";
+        renderCard({
+          id: multiscreen.output_id,
+          name: "Multiscreen",
+          hls_url: multiscreen.hls_url,
+        });
+        return;
       }
+      status.textContent = `${liveCameras.length} live camera(s)`;
+      for (const cam of liveCameras) {
+        renderCard(cam);
+      }
+      if (liveCameras.length === 0) {
+        grid.innerHTML = `<p class="muted" style="padding:1rem 1.5rem">No live cameras enabled. Set <code>live: true</code> in config/cameras.yaml.</p>`;
+      }
+    };
+
+    setActiveTab(selectedView, hasMultiscreen);
+    renderView();
+
+    tabSingles.addEventListener("click", () => {
+      if (selectedView === "singles") return;
+      setActiveTab("singles", hasMultiscreen);
+      renderView();
+    });
+    tabMultiscreen.addEventListener("click", () => {
+      if (!hasMultiscreen || selectedView === "multiscreen") return;
+      setActiveTab("multiscreen", hasMultiscreen);
+      renderView();
+    });
+
+    if (!hasMultiscreen && selectedView === "multiscreen") {
+      setActiveTab("singles", hasMultiscreen);
+      renderView();
     }
-    if (liveCameras.length === 0) {
-      grid.innerHTML = `<p class="muted" style="padding:1rem 1.5rem">No live cameras enabled. Set <code>live: true</code> in config/cameras.yaml.</p>`;
-      return;
-    }
+
     refreshHealth(cards);
     setInterval(() => refreshHealth(cards), 3000);
   } catch (e) {

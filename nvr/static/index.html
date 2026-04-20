@@ -19,6 +19,14 @@
         </nav>
       </div>
       <p class="muted">Live view via HLS. Each camera uses a separate transcoder process.</p>
+      <div id="view-tabs" class="view-tabs" role="tablist" aria-label="Live view mode">
+        <button id="tab-singles" class="view-tab active" role="tab" aria-selected="true">
+          Single Screens
+        </button>
+        <button id="tab-multiscreen" class="view-tab" role="tab" aria-selected="false">
+          Multiscreen
+        </button>
+      </div>
     </header>
     <main id="grid" class="grid" aria-live="polite"></main>
     <footer class="footer muted">

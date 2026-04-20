@@ -11,6 +11,7 @@ from pathlib import Path
 import uvicorn
 
 from nvr.hls_live import ensure_hls_tree, run_camera_hls
+from nvr.multiscreen import run_multiscreen_hls, selected_multiscreen_cameras
 from nvr.recorder import ensure_recording_tree, run_camera_recorder
 from nvr.settings import Settings, default_config_path, load_settings
 from nvr.web_app import create_app
@@ -129,7 +130,16 @@ def main() -> None:
 
     record_any = settings.record and any(settings.should_record(c) for c in settings.cameras)
     live_any = settings.live and any(settings.should_live(c) for c in settings.cameras)
-    if not record_any and not live_any:
+    multiscreen_any = (
+        settings.live
+        and settings.multiscreen.enabled
+        and len(selected_multiscreen_cameras(settings)) > 0
+    )
+    if settings.live and settings.multiscreen.enabled and not multiscreen_any:
+        log.warning(
+            "Multiscreen is enabled but has no eligible live cameras; skipping multiscreen output."
+        )
+    if not record_any and not live_any and not multiscreen_any:
         log.error(
             "Nothing to do: both recording and live are disabled (check config and flags)."
         )
@@ -162,7 +172,7 @@ def main() -> None:
                 daemon=False,
             )
             ffmpeg_threads.append(t)
-    if live_any:
+    if live_any or multiscreen_any:
         ensure_hls_tree(settings)
         for cam in settings.cameras:
             if not settings.should_live(cam):
@@ -175,12 +185,20 @@ def main() -> None:
                 daemon=False,
             )
             ffmpeg_threads.append(t)
+        if multiscreen_any:
+            t = threading.Thread(
+                target=run_multiscreen_hls,
+                args=(settings, stop),
+                name=f"hls-{settings.multiscreen.output_id}",
+                daemon=False,
+            )
+            ffmpeg_threads.append(t)
 
     for t in ffmpeg_threads:
         t.start()
 
     uv_thread: threading.Thread | None = None
-    if live_any:
+    if live_any or multiscreen_any:
         uv_thread = threading.Thread(
             target=_run_uvicorn,
             args=(settings, server_box),
