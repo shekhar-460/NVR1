@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from nvr import __version__
@@ -142,7 +142,41 @@ def create_app(settings: Settings) -> FastAPI:
         name="js",
     )
     hls_root = settings.hls_dir.resolve()
-    app.mount("/live", StaticFiles(directory=str(hls_root)), name="live")
+
+    @app.get("/live/{camera_id}/{filename}")
+    def live_hls(camera_id: str, filename: str) -> Response:
+        # HLS files (.m3u8 / .ts) are actively being written by FFmpeg, so the
+        # file size can grow between a stat() and the actual read. StaticFiles
+        # precomputes Content-Length from stat() which then mismatches the
+        # streamed bytes and raises "Response content longer than Content-Length".
+        # Read the whole file into memory and let Starlette set an exact length.
+        if "/" in camera_id or "\\" in camera_id or camera_id in ("", ".", ".."):
+            raise HTTPException(status_code=404, detail="not found")
+        if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
+            raise HTTPException(status_code=404, detail="not found")
+        path = (hls_root / camera_id / filename).resolve()
+        try:
+            path.relative_to(hls_root)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        except OSError:
+            raise HTTPException(status_code=404, detail="not found")
+        suffix = path.suffix.lower()
+        if suffix == ".m3u8":
+            media_type = "application/vnd.apple.mpegurl"
+        elif suffix == ".ts":
+            media_type = "video/mp2t"
+        elif suffix == ".m4s" or suffix == ".mp4":
+            media_type = "video/mp4"
+        else:
+            media_type = "application/octet-stream"
+        headers = {"Cache-Control": "no-store"}
+        return Response(content=data, media_type=media_type, headers=headers)
+
     return app
 
 
