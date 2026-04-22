@@ -27,6 +27,9 @@ const state = {
   activeCamId: null,
   offset: 0,
   limit: 50,
+  refreshTimer: null,
+  refreshMs: 5000,
+  isRefreshing: false,
 };
 
 async function loadSummary() {
@@ -135,15 +138,49 @@ async function renderRecordings() {
   }
 }
 
-async function init() {
+async function refreshData() {
+  if (state.isRefreshing) return;
+  state.isRefreshing = true;
   try {
     const summary = await loadSummary();
     state.cameras = summary.cameras;
-    renderCamList(summary);
-    const firstWithRecordings = summary.cameras.find((c) => c.count > 0) || summary.cameras[0];
-    if (firstWithRecordings) {
-      await selectCamera(firstWithRecordings.id);
+    const hasActive = summary.cameras.some((c) => c.id === state.activeCamId);
+    if (!hasActive) {
+      const firstWithRecordings =
+        summary.cameras.find((c) => c.count > 0) || summary.cameras[0] || null;
+      state.activeCamId = firstWithRecordings ? firstWithRecordings.id : null;
+      state.offset = 0;
     }
+    renderCamList(summary);
+    if (state.activeCamId) {
+      const cam = state.cameras.find((c) => c.id === state.activeCamId);
+      document.getElementById("cam-name").textContent = cam ? cam.name : state.activeCamId;
+      await renderRecordings();
+    } else {
+      document.getElementById("cam-name").textContent = "No cameras";
+      document.getElementById("cam-meta").textContent = "";
+      document.getElementById("rec-list").innerHTML = `<li class="muted">No recordings.</li>`;
+      document.getElementById("pager").innerHTML = "";
+    }
+  } catch (e) {
+    document.getElementById("summary").textContent = `Failed to refresh: ${e.message || e}`;
+  } finally {
+    state.isRefreshing = false;
+  }
+}
+
+function startAutoRefresh() {
+  if (state.refreshTimer) clearInterval(state.refreshTimer);
+  state.refreshTimer = setInterval(() => {
+    if (document.hidden) return;
+    refreshData();
+  }, state.refreshMs);
+}
+
+async function init() {
+  try {
+    await refreshData();
+    startAutoRefresh();
   } catch (e) {
     document.getElementById("summary").textContent =
       `Failed to load: ${e.message || e}`;

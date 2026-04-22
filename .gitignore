@@ -7,6 +7,8 @@ data/
 recordings/*
 !recordings/.gitkeep
 config/cameras.yaml
+config/cameras1.yaml
+config/cameras2.yaml
 .env
 *.log
 config/
