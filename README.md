@@ -86,6 +86,7 @@ Copy `config/cameras.example.yaml` to `config/cameras.yaml`.
 | `rtsp_transport` | FFmpeg `-rtsp_transport` (`tcp` by default). Also accepts `udp`, `udp_multicast`, `http`. |
 | `record` | Global enable for disk recording (`true` by default). Per-camera overrides below. |
 | `live` | Global enable for HLS/web (`true` by default). Per-camera overrides below. |
+| `live_hls` | Live HLS tuning knobs (`segment_seconds`, `list_size`, `delete_threshold`, `playlist_fresh_seconds`, `target_latency_seconds`). |
 | `multiscreen` | Optional single mosaic HLS output built from selected live cameras (disabled by default). |
 | `web.host` / `web.port` | HTTP bind address and port (`0.0.0.0` and **8765** by default). |
 | `cameras` | List of cameras — see below. |
@@ -128,6 +129,11 @@ The `multiscreen` block is disabled by default. When enabled, NVR starts a separ
 | `rtsp_transport` | `tcp` |
 | `record` | `true` |
 | `live` | `true` |
+| `live_hls.segment_seconds` | `1.0` |
+| `live_hls.list_size` | `6` |
+| `live_hls.delete_threshold` | `1` |
+| `live_hls.playlist_fresh_seconds` | `8.0` |
+| `live_hls.target_latency_seconds` | `3.0` |
 | `multiscreen.enabled` | `false` |
 | `web.host` | `0.0.0.0` |
 | `web.port` | `8765` |

@@ -38,6 +38,7 @@ def _camera_public(cam: Camera, settings: Settings) -> dict[str, Any]:
         "record": settings.should_record(cam),
         "live": settings.should_live(cam),
         "hls_url": f"/live/{cam.id}/stream.m3u8" if settings.should_live(cam) else None,
+        "target_latency_seconds": settings.live_hls.target_latency_seconds,
     }
 
 
@@ -81,7 +82,7 @@ def _multiscreen_health(settings: Settings, now: float, statuses: dict[tuple[str
         }
     mtime = _playlist_mtime(settings.hls_dir, str(base["output_id"]))
     base["hls_playlist_age_s"] = None if mtime is None else max(0.0, now - mtime)
-    base["hls_fresh"] = mtime is not None and (now - mtime) < 10.0
+    base["hls_fresh"] = mtime is not None and (now - mtime) < settings.live_hls.playlist_fresh_seconds
     return base
 
 
@@ -140,7 +141,7 @@ def create_app(settings: Settings) -> FastAPI:
                 mtime = _playlist_mtime(s.hls_dir, cam.id)
                 entry["hls_playlist_age_s"] = None if mtime is None else max(0.0, now - mtime)
                 entry["hls_fresh"] = (
-                    mtime is not None and (now - mtime) < 10.0
+                    mtime is not None and (now - mtime) < settings.live_hls.playlist_fresh_seconds
                 )
             out.append(entry)
         return JSONResponse(

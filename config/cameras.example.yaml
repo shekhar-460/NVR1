@@ -14,6 +14,14 @@ rtsp_transport: tcp
 record: true
 live: true
 
+# Live HLS tuning (lower = less latency, higher = more stability).
+live_hls:
+  segment_seconds: 1.0
+  list_size: 6
+  delete_threshold: 1
+  playlist_fresh_seconds: 8.0
+  target_latency_seconds: 3.0
+
 web:
   host: "0.0.0.0"
   port: 8765

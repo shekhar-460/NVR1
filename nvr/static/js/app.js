@@ -4,11 +4,14 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
-function attachHls(video, url) {
+function attachHls(video, url, targetLatencySeconds) {
   if (window.Hls && window.Hls.isSupported()) {
+    const latency = Math.max(2, Number(targetLatencySeconds || 3));
     const hls = new Hls({
       enableWorker: true,
       lowLatencyMode: true,
+      liveSyncDuration: latency,
+      liveMaxLatencyDuration: latency * 2,
       backBufferLength: 30,
     });
     hls.loadSource(url);
@@ -142,13 +145,13 @@ async function init() {
       `<h2>${escapeHtml(cam.name)}</h2>` +
       `<span class="meta muted">${escapeHtml(cam.id)}</span>` +
       `</header>` +
-      `<video controls muted playsinline></video>` +
+      `<video controls muted autoplay playsinline></video>` +
       `<p class="status muted">connecting…</p>`;
     const video = card.querySelector("video");
     grid.appendChild(card);
     cards.set(cam.id, card);
     try {
-      attachHls(video, cam.hls_url);
+      attachHls(video, cam.hls_url, cam.target_latency_seconds);
     } catch (e) {
       const p = document.createElement("p");
       p.className = "err";

@@ -46,6 +46,15 @@ class MultiScreenSettings:
 
 
 @dataclass
+class LiveHlsSettings:
+    segment_seconds: float = 1.0
+    list_size: int = 6
+    delete_threshold: int = 1
+    playlist_fresh_seconds: float = 8.0
+    target_latency_seconds: float = 3.0
+
+
+@dataclass
 class Settings:
     recordings_dir: Path
     hls_dir: Path
@@ -59,6 +68,7 @@ class Settings:
     record: bool = True
     live: bool = True
     multiscreen: MultiScreenSettings = field(default_factory=MultiScreenSettings)
+    live_hls: LiveHlsSettings = field(default_factory=LiveHlsSettings)
     extras: dict[str, Any] = field(default_factory=dict)
 
     def should_record(self, cam: Camera) -> bool:
@@ -112,6 +122,16 @@ def _as_int(value: Any, key: str, *, minimum: int = 1) -> int:
         out = int(value)
     except (TypeError, ValueError):
         raise SystemExit(f"{key}: expected integer, got {value!r}")
+    if out < minimum:
+        raise SystemExit(f"{key}: expected >= {minimum}, got {out}")
+    return out
+
+
+def _as_float(value: Any, key: str, *, minimum: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        raise SystemExit(f"{key}: expected number, got {value!r}")
     if out < minimum:
         raise SystemExit(f"{key}: expected >= {minimum}, got {out}")
     return out
@@ -173,6 +193,22 @@ def load_settings(path: Path) -> Settings:
     multiscreen_fps = _as_int(multiscreen_raw.get("fps", 10), "multiscreen.fps", minimum=1)
     multiscreen_bitrate = str(multiscreen_raw.get("bitrate", "3000k"))
     multiscreen_preset = str(multiscreen_raw.get("preset", "veryfast"))
+    if multiscreen_preset not in {
+        "ultrafast",
+        "superfast",
+        "veryfast",
+        "faster",
+        "fast",
+        "medium",
+        "slow",
+        "slower",
+        "veryslow",
+        "placebo",
+    }:
+        raise SystemExit(
+            "multiscreen.preset must be a valid x264 preset "
+            f"(got {multiscreen_preset!r})."
+        )
     multiscreen_output_id = str(multiscreen_raw.get("output_id", "multiscreen"))
     if not _SAFE_ID.match(multiscreen_output_id):
         raise SystemExit(
@@ -214,6 +250,32 @@ def load_settings(path: Path) -> Settings:
         raise SystemExit(
             f"multiscreen.camera_ids contains unknown camera IDs: {', '.join(missing)}"
         )
+    live_hls_raw = raw.get("live_hls") or {}
+    live_hls_segment_seconds = _as_float(
+        live_hls_raw.get("segment_seconds", 1.0),
+        "live_hls.segment_seconds",
+        minimum=0.5,
+    )
+    live_hls_list_size = _as_int(
+        live_hls_raw.get("list_size", 6),
+        "live_hls.list_size",
+        minimum=3,
+    )
+    live_hls_delete_threshold = _as_int(
+        live_hls_raw.get("delete_threshold", 1),
+        "live_hls.delete_threshold",
+        minimum=1,
+    )
+    live_hls_playlist_fresh = _as_float(
+        live_hls_raw.get("playlist_fresh_seconds", 8.0),
+        "live_hls.playlist_fresh_seconds",
+        minimum=1.0,
+    )
+    live_hls_target_latency = _as_float(
+        live_hls_raw.get("target_latency_seconds", 3.0),
+        "live_hls.target_latency_seconds",
+        minimum=1.0,
+    )
 
     return Settings(
         recordings_dir=rec,
@@ -235,5 +297,12 @@ def load_settings(path: Path) -> Settings:
             bitrate=multiscreen_bitrate,
             preset=multiscreen_preset,
             output_id=multiscreen_output_id,
+        ),
+        live_hls=LiveHlsSettings(
+            segment_seconds=live_hls_segment_seconds,
+            list_size=live_hls_list_size,
+            delete_threshold=live_hls_delete_threshold,
+            playlist_fresh_seconds=live_hls_playlist_fresh,
+            target_latency_seconds=live_hls_target_latency,
         ),
     )
