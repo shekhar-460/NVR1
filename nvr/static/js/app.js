@@ -35,6 +35,12 @@ function attachHls(video, url, targetLatencySeconds) {
   throw new Error("HLS not supported in this browser.");
 }
 
+function setCardLoading(card, isLoading, message) {
+  card.classList.toggle("is-loading", isLoading);
+  const loader = card.querySelector(".stream-loader-text");
+  if (loader && message) loader.textContent = message;
+}
+
 function stateLabel(cam) {
   const hls = (cam.pipelines && cam.pipelines.hls) || {};
   const rec = (cam.pipelines && cam.pipelines.record) || {};
@@ -101,6 +107,7 @@ async function refreshHealth(cards) {
       dot.dataset.state = state;
       dot.title = state;
       status.textContent = stateLabel(cam);
+      setCardLoading(card, state !== "ok", "Waiting for stream…");
     }
     const ms = data.multiscreen;
     if (ms && ms.active && ms.output_id) {
@@ -112,6 +119,7 @@ async function refreshHealth(cards) {
         dot.dataset.state = state;
         dot.title = state;
         status.textContent = multiscreenLabel(ms);
+        setCardLoading(card, state !== "ok", "Waiting for multiscreen stream…");
       }
     }
   } catch (e) {
@@ -145,11 +153,30 @@ async function init() {
       `<h2>${escapeHtml(cam.name)}</h2>` +
       `<span class="meta muted">${escapeHtml(cam.id)}</span>` +
       `</header>` +
+      `<div class="stream-wrap">` +
       `<video controls muted autoplay playsinline></video>` +
+      `<div class="stream-loader" aria-live="polite">` +
+      `<span class="stream-loader-spinner" aria-hidden="true"></span>` +
+      `<span class="stream-loader-text">Waiting for stream…</span>` +
+      `</div>` +
+      `</div>` +
       `<p class="status muted">connecting…</p>`;
     const video = card.querySelector("video");
+    const loaderMessage =
+      cam.name === "Multiscreen"
+        ? "Waiting for multiscreen stream…"
+        : "Waiting for stream…";
+    const onLoading = () => setCardLoading(card, true, loaderMessage);
+    const onPlaying = () => setCardLoading(card, false);
+    video.addEventListener("loadstart", onLoading);
+    video.addEventListener("waiting", onLoading);
+    video.addEventListener("stalled", onLoading);
+    video.addEventListener("error", onLoading);
+    video.addEventListener("canplay", onPlaying);
+    video.addEventListener("playing", onPlaying);
     grid.appendChild(card);
     cards.set(cam.id, card);
+    onLoading();
     try {
       attachHls(video, cam.hls_url, cam.target_latency_seconds);
     } catch (e) {

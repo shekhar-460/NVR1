@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 
 from nvr.settings import Camera, Settings
 from nvr.supervisor import supervise_ffmpeg
@@ -37,6 +38,8 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
     for cam in cameras:
         cmd.extend(
             [
+                "-thread_queue_size",
+                "512",
                 "-fflags",
                 "+genpts+discardcorrupt+nobuffer",
                 "-flags",
@@ -45,8 +48,6 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
                 "1000000",
                 "-probesize",
                 "1000000",
-                "-rw_timeout",
-                "10000000",
                 "-rtsp_transport",
                 settings.rtsp_transport,
                 "-i",
@@ -126,10 +127,28 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
 
 def run_multiscreen_hls(settings: Settings, stop: threading.Event) -> None:
     ms = settings.multiscreen
+    playlist = settings.hls_dir / ms.output_id / "stream.m3u8"
+    stale_after_s = max(15.0, settings.live_hls.playlist_fresh_seconds * 2.0)
+    startup_grace_s = max(20.0, stale_after_s)
+
+    def _restart_when_stale(runtime_s: float) -> str | None:
+        if runtime_s < startup_grace_s:
+            return None
+        try:
+            age_s = time.time() - playlist.stat().st_mtime
+        except FileNotFoundError:
+            return f"playlist not created after {runtime_s:.0f}s"
+        except OSError:
+            return f"playlist stat failed after {runtime_s:.0f}s"
+        if age_s > stale_after_s:
+            return f"playlist stale for {age_s:.1f}s"
+        return None
+
     supervise_ffmpeg(
         f"hls:Multiscreen ({ms.output_id})",
         lambda: build_multiscreen_hls_command(settings),
         stop,
         camera_id=ms.output_id,
         role="hls",
+        restart_when=_restart_when_stale,
     )

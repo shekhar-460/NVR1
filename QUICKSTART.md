@@ -64,6 +64,7 @@ Edit **`config/cameras.yaml`**:
 - Give each camera a unique **`id`** matching `[A-Za-z0-9][A-Za-z0-9_-]*` (it's used as a directory name).
 - **`recordings_dir`** / **`hls_dir`** paths are relative to the **`config/`** directory unless absolute.
 - Use **`record`** / **`live`** (top-level or per-camera) to enable/disable each pipeline. `record: false` + `live: true` is the low-CPU live-only setup; the same effect is available one-off via `--no-record`.
+- Tune live latency/stability with **`live_hls`** (`segment_seconds`, `list_size`, `delete_threshold`, `playlist_fresh_seconds`, `target_latency_seconds`).
 - Optional: enable **`multiscreen`** to publish one combined live mosaic stream in parallel with normal per-camera streams.
 
 Example (matches the template defaults):
@@ -79,6 +80,13 @@ rtsp_transport: tcp
 record: true
 live: true
 
+live_hls:
+  segment_seconds: 1.0
+  list_size: 6
+  delete_threshold: 1
+  playlist_fresh_seconds: 8.0
+  target_latency_seconds: 3.0
+
 web:
   host: "0.0.0.0"
   port: 8765
@@ -91,7 +99,7 @@ multiscreen:
   tile_height: 360
   fps: 10
   bitrate: 3000k
-  preset: veryfast
+  preset: veryfast  # valid x264 presets: ultrafast..placebo
   output_id: multiscreen
 
 cameras:
@@ -182,7 +190,9 @@ If multiscreen is enabled and active, it appears as its own tile at the top of t
 | `Missing or empty environment variable 'NVR_…'` | Create `.env` from `.env.example` and fill in the referenced variables. |
 | Blank or frozen video tiles | Wait a few seconds for the first HLS segments; run with `-v` and check the per-camera FFmpeg lines (`nvr.ffmpeg.hls.<id>`); validate the RTSP URL with `ffplay` or `ffmpeg -i`. The status dot going yellow → green indicates progress. |
 | Multiscreen stutters / high CPU | Lower `multiscreen.fps`, `tile_width`, `tile_height`, or bitrate; multiscreen re-encodes all included cameras. |
+| Live feels too delayed / too jumpy | Tune `live_hls`: lower `segment_seconds`/`list_size` for less delay, or increase them for better stability on weak links. |
 | Red dot immediately | Permanent failure after repeated sub-3s restarts. Open `/api/health`, read `last_error`. Common causes: wrong URL path, wrong password, unsupported transport. |
+| `multiscreen.preset must be a valid x264 preset` | Fix `multiscreen.preset` (common typo: `veryfa#st`). Use one of `ultrafast`, `superfast`, `veryfast`, `faster`, `fast`, `medium`, `slow`, `slower`, `veryslow`, `placebo`. |
 | `ModuleNotFoundError` / import errors | Run **`python3 -m nvr`** from the **project root**, not from inside the `nvr/` source folder. |
 | Wrong recordings folder | Paths in YAML are relative to **`config/`** unless absolute; see [README.md](README.md). |
 | HEVC / `hvc1` / blank HLS in Chrome | Set **`hevc_tag: true`** on that camera; for H.264 substreams remove it. HEVC in the browser may still need Safari or an H.264 URL. |

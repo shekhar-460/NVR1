@@ -147,6 +147,36 @@ body {
   display: block;
 }
 
+.stream-wrap {
+  position: relative;
+}
+
+.stream-loader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.card.is-loading .stream-loader {
+  display: flex;
+}
+
+.stream-loader-spinner {
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  border: 2px solid rgba(230, 237, 243, 0.35);
+  border-top-color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+
 .card .status {
   padding: 0.4rem 1rem 0.75rem;
   font-size: 0.8rem;
@@ -195,6 +225,15 @@ body {
   }
   50% {
     opacity: 0.45;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

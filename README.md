@@ -152,7 +152,7 @@ Files are written in **one directory per camera** (FFmpeg does not create nested
 - **`GET /`** — live dashboard (one tile per camera with `live: true`; includes a **Multiscreen** tile when multiscreen is active).
 - **`GET /recordings`** — recordings browser (list by camera, inline play, download).
 - **`GET /docs`** — interactive OpenAPI UI (FastAPI).
-- **`GET /api/cameras`** — JSON list of cameras with `{id, name, enabled, record, live, hls_url}`.
+- **`GET /api/cameras`** — JSON list of cameras with `{id, name, enabled, record, live, hls_url, target_latency_seconds}`.
 - **`GET /api/health`** — per-camera pipeline state: `running`, `uptime_s`, `restart_count`, `failure_streak`, `last_exit_code`, `last_error`, and `hls_playlist_age_s` / `hls_fresh` for quick external monitoring.
 - **`GET /api/multiscreen`** — multiscreen config/runtime view: enabled/active state, selected camera IDs, output ID, and HLS URL.
 - **`GET /api/recordings`** — summary: per-camera counts and total bytes.
@@ -205,6 +205,27 @@ Each tile has a colored status dot, refreshed every few seconds from `/api/healt
 The line under each video shows the current state (`live: running`, `record: running`, playlist age) for quick at-a-glance diagnosis.
 
 When `multiscreen.enabled: true` and at least one eligible live camera exists, the dashboard also shows a **Multiscreen** tile (fed by `/live/<output_id>/stream.m3u8`). Its status is derived from the same health model (`running`, `restarting`, `stalled`, `failed`) and playlist freshness checks.
+
+### Live streaming tuning
+
+Use the `live_hls` block to trade off latency vs stability:
+
+```yaml
+live_hls:
+  segment_seconds: 1.0
+  list_size: 6
+  delete_threshold: 1
+  playlist_fresh_seconds: 8.0
+  target_latency_seconds: 3.0
+```
+
+- `segment_seconds` — lower values reduce latency but create more filesystem churn.
+- `list_size` — number of segments exposed in the rolling playlist window.
+- `delete_threshold` — extra old segments kept before FFmpeg deletion starts.
+- `playlist_fresh_seconds` — threshold used by `/api/health` to classify stale HLS.
+- `target_latency_seconds` — forwarded to the browser player (`hls.js`) live sync target.
+
+For unstable links, raise `segment_seconds` (for example `1.5`-`2.0`) and `list_size` (`8`-`10`). For lowest possible latency on stable LAN streams, keep `segment_seconds: 1.0` with a small list (`5`-`6`).
 
 ## Recordings browser
 

@@ -20,8 +20,6 @@ def ffmpeg_input_args(cam: Camera, settings: Settings) -> list[str]:
         "1000000",
         "-probesize",
         "1000000",
-        "-rw_timeout",
-        "10000000",
         "-rtsp_transport",
         settings.rtsp_transport,
         "-i",

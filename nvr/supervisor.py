@@ -91,6 +91,7 @@ def supervise_ffmpeg(
     *,
     camera_id: str,
     role: Role,
+    restart_when: Callable[[float], str | None] | None = None,
 ) -> None:
     """Run FFmpeg in a loop until ``stop`` is set; rebuild the command each attempt."""
     backoff = 1.0
@@ -127,6 +128,13 @@ def supervise_ffmpeg(
 
         while proc.poll() is None and not stop.is_set():
             stop.wait(0.5)
+            if restart_when is not None:
+                runtime_s = time.monotonic() - started
+                reason = restart_when(runtime_s)
+                if reason:
+                    cam_logger.warning("Restarting FFmpeg (%s): %s", label, reason)
+                    _terminate(proc)
+                    break
 
         if stop.is_set():
             _terminate(proc)
