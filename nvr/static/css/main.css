@@ -140,6 +140,55 @@ body {
   flex: 0 0 auto;
 }
 
+.card-open {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.card-open:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.single-cam {
+  padding: 1.25rem 1.5rem 4rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.card--solo {
+  width: 100%;
+}
+
+.stream-wrap--solo video,
+.card--solo video {
+  width: 100%;
+  max-height: calc(100vh - 11rem);
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+
+.card--solo .stream-url {
+  padding: 0 1rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+
+.card--solo .stream-url a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.card--solo .stream-url a:hover {
+  color: var(--accent);
+}
+
 .card video {
   width: 100%;
   aspect-ratio: 16 / 9;

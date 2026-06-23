@@ -152,6 +152,9 @@ async function init() {
       `<span class="dot" data-state="pending" title="pending"></span>` +
       `<h2>${escapeHtml(cam.name)}</h2>` +
       `<span class="meta muted">${escapeHtml(cam.id)}</span>` +
+      (cam.view_url
+        ? `<a class="card-open" href="${escapeHtml(cam.view_url)}" title="Open single-camera view">Single</a>`
+        : "") +
       `</header>` +
       `<div class="stream-wrap">` +
       `<video controls muted autoplay playsinline></video>` +

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NVR — Camera</title>
+    <link rel="stylesheet" href="/css/main.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="nav">
+        <h1 id="page-title">NVR</h1>
+        <nav class="muted">
+          <a href="/">← All cameras</a>
+          <span aria-hidden="true">·</span>
+          <a href="/recordings">Recordings</a>
+          <span aria-hidden="true">·</span>
+          <a href="/docs">API</a>
+        </nav>
+      </div>
+      <p id="page-subtitle" class="muted">Single camera live view</p>
+    </header>
+    <main id="single" class="single-cam" aria-live="polite"></main>
+    <footer class="footer muted">
+      <span id="status">Loading…</span>
+    </footer>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+    <script src="/js/camera.js"></script>
+  </body>
+</html>

@@ -93,13 +93,27 @@ def supervise_ffmpeg(
     role: Role,
     restart_when: Callable[[float], str | None] | None = None,
 ) -> None:
-    """Run FFmpeg in a loop until ``stop`` is set; rebuild the command each attempt."""
+    """Run FFmpeg in a loop until ``stop`` is set; rebuild the command each attempt.
+
+    Each camera pipeline is independent: failures here never signal the global
+    ``stop`` event, and this loop keeps retrying so other cameras are unaffected.
+    """
     backoff = 1.0
     max_backoff = 60.0
     cam_logger = logging.getLogger(f"nvr.ffmpeg.{role}.{camera_id}")
+    chronic_failure_logged = False
 
     while not stop.is_set():
-        cmd = build_cmd()
+        try:
+            cmd = build_cmd()
+        except Exception:
+            cam_logger.exception("Failed to build FFmpeg command for %s", label)
+            REGISTRY.mark_failed_permanently(camera_id, role)
+            if stop.wait(min(backoff, max_backoff)):
+                return
+            backoff = min(max_backoff, backoff * 2)
+            continue
+
         log.info("Starting FFmpeg: %s", label)
         cam_logger.debug("cmd: %s", " ".join(cmd))
         try:
@@ -110,12 +124,25 @@ def supervise_ffmpeg(
                 start_new_session=True,
             )
         except FileNotFoundError:
-            log.error("ffmpeg not found; install ffmpeg and ensure it is on PATH")
+            log.error(
+                "ffmpeg not found for %s; install ffmpeg and ensure it is on PATH "
+                "(other cameras keep running)",
+                label,
+            )
             REGISTRY.mark_failed_permanently(camera_id, role)
-            stop.set()
-            return
+            if stop.wait(max_backoff):
+                return
+            continue
+        except OSError as exc:
+            cam_logger.error("Failed to start FFmpeg for %s: %s", label, exc)
+            REGISTRY.mark_failed_permanently(camera_id, role)
+            if stop.wait(min(backoff, max_backoff)):
+                return
+            backoff = min(max_backoff, backoff * 2)
+            continue
 
         REGISTRY.mark_started(camera_id, role)
+        chronic_failure_logged = False
         started = time.monotonic()
         last_line: list[str] = [""]
         pump = threading.Thread(
@@ -171,24 +198,28 @@ def supervise_ffmpeg(
                 backoff,
             )
         elif runtime < _IMMEDIATE_FAIL_S:
-            log.warning(
-                "FFmpeg exited (%s) after %.1fs with code %s (streak=%d); retrying in %.0fs",
-                label,
-                runtime,
-                code,
-                status.failure_streak,
-                backoff,
-            )
             if status.failure_streak >= _MAX_IMMEDIATE_FAILURES:
-                log.error(
-                    "FFmpeg for %s failed %d times in a row with no healthy run; "
-                    "giving up. Last stderr: %s",
-                    label,
-                    status.failure_streak,
-                    last_line[0] or "(empty)",
-                )
                 REGISTRY.mark_failed_permanently(camera_id, role)
-                return
+                backoff = max_backoff
+                if not chronic_failure_logged:
+                    log.error(
+                        "FFmpeg for %s failed %d times in a row with no healthy run; "
+                        "retrying every %.0fs (other cameras unaffected). Last stderr: %s",
+                        label,
+                        status.failure_streak,
+                        backoff,
+                        last_line[0] or "(empty)",
+                    )
+                    chronic_failure_logged = True
+            else:
+                log.warning(
+                    "FFmpeg exited (%s) after %.1fs with code %s (streak=%d); retrying in %.0fs",
+                    label,
+                    runtime,
+                    code,
+                    status.failure_streak,
+                    backoff,
+                )
         else:
             log.warning(
                 "FFmpeg exited (%s) after %.0fs with code %s; retrying in %.0fs",

@@ -71,6 +71,7 @@ class Registry:
         with self._lock:
             s.running = True
             s.started_at = time.time()
+            s.failed_permanently = False
 
     def mark_exited(
         self,

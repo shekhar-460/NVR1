@@ -30,6 +30,8 @@ class Camera:
 class WebSettings:
     host: str
     port: int
+    # Optional LAN IP/hostname for LIST.md and logs (defaults to auto-detect).
+    public_host: str | None = None
 
 
 @dataclass
@@ -169,9 +171,12 @@ def load_settings(path: Path) -> Settings:
     live_default = _as_bool(raw.get("live", True), "live")
 
     web_raw = raw.get("web") or {}
+    public_host_raw = web_raw.get("public_host")
+    public_host = None if public_host_raw is None else str(public_host_raw).strip() or None
     web = WebSettings(
         host=str(web_raw.get("host", "0.0.0.0")),
         port=int(web_raw.get("port", 8765)),
+        public_host=public_host,
     )
     multiscreen_raw = raw.get("multiscreen") or {}
     multiscreen_enabled = _as_bool(multiscreen_raw.get("enabled", False), "multiscreen.enabled")

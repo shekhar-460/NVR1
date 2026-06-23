@@ -4,6 +4,7 @@ import math
 import threading
 import time
 
+from nvr.ffmpeg_common import is_rtsp_url
 from nvr.settings import Camera, Settings
 from nvr.supervisor import supervise_ffmpeg
 
@@ -36,24 +37,22 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
 
     cmd: list[str] = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
     for cam in cameras:
-        cmd.extend(
-            [
-                "-thread_queue_size",
-                "512",
-                "-fflags",
-                "+genpts+discardcorrupt+nobuffer",
-                "-flags",
-                "low_delay",
-                "-analyzeduration",
-                "1000000",
-                "-probesize",
-                "1000000",
-                "-rtsp_transport",
-                settings.rtsp_transport,
-                "-i",
-                cam.url,
-            ]
-        )
+        input_args = [
+            "-thread_queue_size",
+            "512",
+            "-fflags",
+            "+genpts+discardcorrupt+nobuffer",
+            "-flags",
+            "low_delay",
+            "-analyzeduration",
+            "1000000",
+            "-probesize",
+            "1000000",
+        ]
+        if is_rtsp_url(cam.url):
+            input_args.extend(["-rtsp_transport", settings.rtsp_transport])
+        input_args.extend(["-i", cam.url])
+        cmd.extend(input_args)
 
     # Normalize all inputs to fixed-size tiles and compose into one canvas.
     filter_parts: list[str] = []

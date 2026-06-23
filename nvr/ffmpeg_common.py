@@ -5,9 +5,13 @@ from __future__ import annotations
 from nvr.settings import Camera, Settings
 
 
+def is_rtsp_url(url: str) -> bool:
+    return url.lower().startswith("rtsp://") or url.lower().startswith("rtsps://")
+
+
 def ffmpeg_input_args(cam: Camera, settings: Settings) -> list[str]:
     """Return the common ``ffmpeg ... -i URL -an`` preamble for one camera."""
-    return [
+    args = [
         "ffmpeg",
         "-hide_banner",
         "-loglevel",
@@ -20,12 +24,11 @@ def ffmpeg_input_args(cam: Camera, settings: Settings) -> list[str]:
         "1000000",
         "-probesize",
         "1000000",
-        "-rtsp_transport",
-        settings.rtsp_transport,
-        "-i",
-        cam.url,
-        "-an",
     ]
+    if is_rtsp_url(cam.url):
+        args.extend(["-rtsp_transport", settings.rtsp_transport])
+    args.extend(["-i", cam.url, "-an"])
+    return args
 
 
 def copy_codec_args(cam: Camera) -> list[str]:

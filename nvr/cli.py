@@ -10,7 +10,10 @@ from pathlib import Path
 
 import uvicorn
 
+from collections.abc import Callable
+
 from nvr.hls_live import ensure_hls_tree, run_camera_hls
+from nvr.list_md import log_startup_plan, public_base_url, write_list_md
 from nvr.multiscreen import run_multiscreen_hls, selected_multiscreen_cameras
 from nvr.recorder import ensure_recording_tree, run_camera_recorder
 from nvr.settings import Settings, default_config_path, load_settings
@@ -33,6 +36,29 @@ class _RedactingFilter(logging.Filter):
             record.msg = _URL_CREDS.sub(r"\1***@", msg)
             record.args = ()
         return True
+
+
+def _run_isolated_pipeline(
+    label: str,
+    run_fn: Callable[[], None],
+    stop: threading.Event,
+    *,
+    restart_delay_s: float = 10.0,
+) -> None:
+    """Run one camera pipeline; uncaught errors never stop other cameras."""
+    while not stop.is_set():
+        try:
+            run_fn()
+            return
+        except Exception:
+            log.exception(
+                "Pipeline thread crashed for %s; restarting in %.0fs "
+                "(other cameras unaffected)",
+                label,
+                restart_delay_s,
+            )
+            if stop.wait(restart_delay_s):
+                return
 
 
 def _run_uvicorn(settings: Settings, server_box: list[uvicorn.Server]) -> None:
@@ -145,6 +171,12 @@ def main() -> None:
         )
         sys.exit(2)
 
+    log_startup_plan(settings)
+    try:
+        write_list_md(settings, args.config)
+    except OSError as exc:
+        log.warning("Could not write LIST.md: %s", exc)
+
     stop = threading.Event()
     server_box: list[uvicorn.Server] = []
 
@@ -166,8 +198,12 @@ def main() -> None:
                 log.info("Recording disabled for %s (%s)", cam.name, cam.id)
                 continue
             t = threading.Thread(
-                target=run_camera_recorder,
-                args=(cam, settings, stop),
+                target=_run_isolated_pipeline,
+                args=(
+                    f"record:{cam.name} ({cam.id})",
+                    lambda c=cam: run_camera_recorder(c, settings, stop),
+                    stop,
+                ),
                 name=f"record-{cam.id}",
                 daemon=False,
             )
@@ -179,17 +215,26 @@ def main() -> None:
                 log.info("Live/HLS disabled for %s (%s)", cam.name, cam.id)
                 continue
             t = threading.Thread(
-                target=run_camera_hls,
-                args=(cam, settings, stop),
+                target=_run_isolated_pipeline,
+                args=(
+                    f"hls:{cam.name} ({cam.id})",
+                    lambda c=cam: run_camera_hls(c, settings, stop),
+                    stop,
+                ),
                 name=f"hls-{cam.id}",
                 daemon=False,
             )
             ffmpeg_threads.append(t)
         if multiscreen_any:
+            ms = settings.multiscreen
             t = threading.Thread(
-                target=run_multiscreen_hls,
-                args=(settings, stop),
-                name=f"hls-{settings.multiscreen.output_id}",
+                target=_run_isolated_pipeline,
+                args=(
+                    f"hls:Multiscreen ({ms.output_id})",
+                    lambda: run_multiscreen_hls(settings, stop),
+                    stop,
+                ),
+                name=f"hls-{ms.output_id}",
                 daemon=False,
             )
             ffmpeg_threads.append(t)
@@ -206,13 +251,9 @@ def main() -> None:
             daemon=False,
         )
         uv_thread.start()
-        log.info(
-            "Web UI: http://%s:%s/",
-            settings.web.host if settings.web.host != "0.0.0.0" else "127.0.0.1",
-            settings.web.port,
-        )
+        log.info("Web UI: %s/", public_base_url(settings))
         if settings.web.host == "0.0.0.0":
-            log.info("Listening on all interfaces; use your LAN IP to open from other devices.")
+            log.info("Listening on all interfaces (0.0.0.0:%s)", settings.web.port)
 
     try:
         while not stop.is_set():

@@ -38,6 +38,7 @@ def _camera_public(cam: Camera, settings: Settings) -> dict[str, Any]:
         "record": settings.should_record(cam),
         "live": settings.should_live(cam),
         "hls_url": f"/live/{cam.id}/stream.m3u8" if settings.should_live(cam) else None,
+        "view_url": f"/cam/{cam.id}" if settings.should_live(cam) else None,
         "target_latency_seconds": settings.live_hls.target_latency_seconds,
     }
 
@@ -185,6 +186,14 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/recordings")
     def recordings_page() -> FileResponse:
         return FileResponse(static_dir / "recordings.html")
+
+    @app.get("/cam/{camera_id}")
+    def camera_page(camera_id: str) -> FileResponse:
+        if camera_id in ("", ".", "..") or "/" in camera_id or "\\" in camera_id:
+            raise HTTPException(status_code=404, detail="camera not found")
+        if camera_id not in {c.id for c in settings.cameras}:
+            raise HTTPException(status_code=404, detail="camera not found")
+        return FileResponse(static_dir / "camera.html")
 
     app.mount(
         "/css",
