@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 
-from nvr.ffmpeg_common import copy_codec_args, ffmpeg_input_args
+from nvr.ffmpeg_common import copy_codec_args, ffmpeg_input_args, mux_timestamp_args
 from nvr.settings import Camera, Settings
 from nvr.supervisor import supervise_ffmpeg
 
@@ -20,8 +20,9 @@ def build_record_command(cam: Camera, settings: Settings) -> list[str]:
     # Single directory per camera (no nested date folders): FFmpeg does not mkdir
     # %Y-%m-%d for segment output.
     pattern = str(out_dir / f"%Y-%m-%d_%H-%M-%S{ext}")
-    cmd = ffmpeg_input_args(cam, settings)
+    cmd = ffmpeg_input_args(cam, settings, normalize_timestamps=True)
     cmd.extend(copy_codec_args(cam))
+    cmd.extend(mux_timestamp_args())
     cmd.extend(
         [
             "-f",

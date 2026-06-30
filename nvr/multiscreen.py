@@ -4,7 +4,7 @@ import math
 import threading
 import time
 
-from nvr.ffmpeg_common import is_rtsp_url
+from nvr.ffmpeg_common import ffmpeg_base_args, ffmpeg_input_block, hls_output_args
 from nvr.settings import Camera, Settings
 from nvr.supervisor import supervise_ffmpeg
 
@@ -35,24 +35,16 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
     out_dir.mkdir(parents=True, exist_ok=True)
     playlist = out_dir / "stream.m3u8"
 
-    cmd: list[str] = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
+    cmd = ffmpeg_base_args()
     for cam in cameras:
-        input_args = [
-            "-thread_queue_size",
-            "512",
-            "-fflags",
-            "+genpts+discardcorrupt+nobuffer",
-            "-flags",
-            "low_delay",
-            "-analyzeduration",
-            "1000000",
-            "-probesize",
-            "1000000",
-        ]
-        if is_rtsp_url(cam.url):
-            input_args.extend(["-rtsp_transport", settings.rtsp_transport])
-        input_args.extend(["-i", cam.url])
-        cmd.extend(input_args)
+        cmd.extend(
+            ffmpeg_input_block(
+                cam,
+                settings,
+                normalize_timestamps=True,
+                thread_queue_size=512,
+            )
+        )
 
     # Normalize all inputs to fixed-size tiles and compose into one canvas.
     filter_parts: list[str] = []
@@ -104,21 +96,11 @@ def build_multiscreen_hls_command(settings: Settings) -> list[str]:
             ms.bitrate,
             "-bufsize",
             bufsize,
-            "-f",
-            "hls",
-            "-hls_time",
-            str(settings.live_hls.segment_seconds),
-            "-hls_list_size",
-            str(settings.live_hls.list_size),
-            "-hls_flags",
-            "delete_segments+append_list+omit_endlist+independent_segments",
-            "-hls_start_number_source",
-            "epoch",
-            "-hls_delete_threshold",
-            str(settings.live_hls.delete_threshold),
-            "-hls_segment_filename",
-            str(out_dir / "segment_%03d.ts"),
-            str(playlist),
+            *hls_output_args(
+                settings,
+                str(out_dir / "segment_%03d.ts"),
+                playlist,
+            ),
         ]
     )
     return cmd

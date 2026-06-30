@@ -26,10 +26,6 @@ http://192.168.15.164:8765/live/cam_6/stream.m3u8
 http://192.168.15.164:8765/live/cam_7/stream.m3u8
 http://192.168.15.164:8765/live/cam_8/stream.m3u8
 
-## Multiscreen
-
-http://192.168.15.164:8765/live/multiscreen/stream.m3u8
-
 ## All cameras grid
 
 http://192.168.15.164:8765/

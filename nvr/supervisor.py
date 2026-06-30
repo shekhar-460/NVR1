@@ -25,12 +25,42 @@ _IMMEDIATE_FAIL_S = 3.0
 # it failed so the UI / health endpoint can show it.
 _MAX_IMMEDIATE_FAILURES = 10
 
+# FFmpeg warnings that repeat every frame on some IP cameras; aggregate instead
+# of logging each line (which can flood PM2 / journald and stall the process).
+_FFMPEG_SPAM_PATTERNS = (
+    "non-monotonic dts",
+    "queue input is backward in time",
+    "past duration",
+    "timestamp discontinuity",
+)
+_FFMPEG_SPAM_LOG_INTERVAL_S = 30.0
+
+
+def _is_ffmpeg_spam(line: str) -> bool:
+    lowered = line.lower()
+    return any(pattern in lowered for pattern in _FFMPEG_SPAM_PATTERNS)
+
+
+def _log_ffmpeg_spam_summary(
+    logger: logging.Logger,
+    spam_count: int,
+    interval_s: float,
+) -> None:
+    logger.warning(
+        "FFmpeg emitted %d repetitive timestamp warning(s) in the last %.0fs "
+        "(source timestamps are irregular; output is being corrected)",
+        spam_count,
+        max(1.0, interval_s),
+    )
+
 
 def _pump_stderr(proc: subprocess.Popen[bytes], logger: logging.Logger, last_line: list[str]) -> None:
     """Read FFmpeg stderr line-by-line into the per-camera logger."""
     stream = proc.stderr
     if stream is None:
         return
+    spam_count = 0
+    spam_last_log = 0.0
     try:
         for raw in iter(stream.readline, b""):
             line = raw.decode("utf-8", errors="replace").rstrip()
@@ -38,6 +68,18 @@ def _pump_stderr(proc: subprocess.Popen[bytes], logger: logging.Logger, last_lin
                 continue
             last_line[0] = line
             lowered = line.lower()
+            if _is_ffmpeg_spam(lowered):
+                spam_count += 1
+                now = time.monotonic()
+                if now - spam_last_log >= _FFMPEG_SPAM_LOG_INTERVAL_S:
+                    _log_ffmpeg_spam_summary(
+                        logger,
+                        spam_count,
+                        now - spam_last_log if spam_last_log else _FFMPEG_SPAM_LOG_INTERVAL_S,
+                    )
+                    spam_count = 0
+                    spam_last_log = now
+                continue
             if "error" in lowered or "failed" in lowered:
                 logger.error(line)
             elif "warning" in lowered:
@@ -47,6 +89,8 @@ def _pump_stderr(proc: subprocess.Popen[bytes], logger: logging.Logger, last_lin
     except Exception:  # pragma: no cover - defensive
         logger.debug("stderr pump stopped", exc_info=True)
     finally:
+        if spam_count:
+            _log_ffmpeg_spam_summary(logger, spam_count, _FFMPEG_SPAM_LOG_INTERVAL_S)
         try:
             stream.close()
         except Exception:
